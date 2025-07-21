@@ -1,14 +1,23 @@
+#![allow(dead_code)]
+
 use crate::dvs::{DvsRawEncoder, DVSRawEvent};
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B28, B4, B11, B6};
 use std::io::{BufWriter, Write, Seek};
 
+/* 
+This file implements an EVT2 raw event encoder for Dynamic Vision Sensor (DVS) data streams.
+It provides types and logic to parse a vector of DVSRaWEvents into an EVT2-formatted event file, extract sensor metadata, and decode individual events.
+*/
+
+type Timestamp = u64;
+// An enum representing the possible event types in EVT2 streams:
 #[derive(Debug, Clone, Copy)]
 enum EventTypes {
-    CdOff = 0x0,
-    CdOn = 0x1,
-    EvtTimeHigh = 0x8,
-    ExtTrigger = 0xA,
+    CdOff = 0x0,        // Change Detection event, polarity off.
+    CdOn = 0x1,         // Change Detection event, polarity on.
+    EvtTimeHigh = 0x8,  // EVT_TIME_HIGH event, used for timestamp synchronization.
+    ExtTrigger = 0xA,   // External trigger event
 }
 
 impl From<u8> for EventTypes {
@@ -23,6 +32,7 @@ impl From<u8> for EventTypes {
     }
 }
 
+// A bitfield struct representing the raw 32 bits of an event in EVT2 format
 #[bitfield]
 #[derive(Clone)]
 struct RawEvent {
@@ -30,22 +40,23 @@ struct RawEvent {
     pad: B28,
 }
 
-pub type Timestamp = u64;
-
+// A bitfield struct for EVT_TIME_HIGH events, which contain a timestamp
 #[bitfield]
 struct RawEventTime {
-    r#type: B4,
-    timestamp: B28,
+    r#type: B4,     // Event type
+    timestamp: B28  // Event timestamp
 }
 
+// A bitfield struct for Change Detection events, which contain pixel coordinates, polarity, and timestamp
 #[bitfield]
 struct RawEventCD {
-    r#type: B4, // Event type : EventTypes::EVT_ADDR_X
-    timestamp: B6,
-    x: B11, // Pixel X coordinate
-    y: B11, // Pixel Y coordinate
+    r#type: B4,     // Event type
+    timestamp: B6,  // Event timestamp
+    x: B11,         // Pixel X coordinate
+    y: B11,         // Pixel Y coordinate
 }
 
+// Conversion from RawEventCD to RawEvent
 impl From<RawEventCD> for RawEvent {
     fn from(event: RawEventCD) -> Self {
         let event_cd = RawEvent::new()
@@ -55,15 +66,17 @@ impl From<RawEventCD> for RawEvent {
     }
 }
 
+// Conversion from RawEventTime to RawEvent
 impl From<RawEventTime> for RawEvent {
     fn from(event: RawEventTime) -> Self {
         let event_time = RawEvent::new()
-            .with_pad((event.timestamp() as u32))
+            .with_pad(event.timestamp() as u32)
             .with_type(event.r#type());
         event_time
     }
 }
 
+// Conversion from RawEvent to a byte array for writing to the EVT2 file
 impl From<RawEvent> for [u8; 4] {
     fn from(event: RawEvent) -> Self {
         let mut value = [0u8; 4];
@@ -89,6 +102,7 @@ impl<R: Write + Seek> DvsRawEncoder<R> for DVSRawEncoderEvt2<R> {
         }
     }
 
+    // Writes the header to the EVT2 file, including sensor metadata and initial timestamp
     fn write_header(&mut self, header: Vec<String>) -> anyhow::Result<()> {
         let writer = self.writer.get_mut();
         for line in header {
@@ -99,6 +113,7 @@ impl<R: Write + Seek> DvsRawEncoder<R> for DVSRawEncoderEvt2<R> {
         Ok(())
     }
 
+    // Writes a DVSRawEvent to the EVT2 file, converting it to the appropriate RawEvent format
     fn write_event(&mut self, event: DVSRawEvent) -> anyhow::Result<()> {
         match event {
             DVSRawEvent::CD(ev) => {

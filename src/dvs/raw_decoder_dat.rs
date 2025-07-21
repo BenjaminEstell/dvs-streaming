@@ -1,4 +1,6 @@
-use crate::dvs::{DVSEvent, DvsRawDecoder, DVSRawEvent};
+#![allow(dead_code)]
+
+use crate::dvs::{DvsRawDecoder, DVSRawEvent};
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B4, B32, B14};
 use std::io::{self, BufRead, BufReader, Read, Seek};

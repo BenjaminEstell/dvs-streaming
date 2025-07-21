@@ -1,5 +1,4 @@
 use crate::dvs::raw_decoder_evt2::DVSRawDecoderEvt2;
-use crate::dvs::raw_decoder_evt3::DVSRawDecoderEvt3;
 use crate::dvs::raw_encoder_evt2::DVSRawEncoderEvt2;
 use crate::dvs::raw_decoder_dat::DVSRawDecoderDat;
 use bytes::Bytes;
@@ -7,7 +6,6 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, Write};
 
 pub mod raw_decoder_evt2;
-pub mod raw_decoder_evt3;
 pub mod raw_encoder_evt2;
 pub mod raw_decoder_dat;
 
@@ -76,30 +74,24 @@ impl From<bytes::Bytes> for DVSEvent {
 
 pub trait DvsRawDecoder<R: Read + BufRead + Seek>: Sized {
     fn new(reader: R) -> Self;
-
     fn read_header(&mut self) -> anyhow::Result<Vec<String>>;
-    //fn read_event(&mut self) -> anyhow::Result<Option<DVSEvent>>;
     fn read_event(&mut self) -> anyhow::Result<Option<DVSRawEvent>>;
 }
 
 pub trait DvsRawEncoder<R: Write + Seek>: Sized {
     fn new(reader: R) -> Self;
-
     fn write_header(&mut self, header: Vec<String>) -> anyhow::Result<()>;
-    //fn write_event(&mut self, event: DVSEvent) -> anyhow::Result<()>;
     fn write_event(&mut self, event: DVSRawEvent) -> anyhow::Result<()>;
 
 }
 
 pub enum DvsRawDecoderEnum<R: Read + BufRead + Seek> {
     Evt2(DVSRawDecoderEvt2<R>),
-    Evt3(DVSRawDecoderEvt3<R>),
     Dat(DVSRawDecoderDat<R>),
 }
 
 pub enum DvsRawEncoderEnum<R: Write + Seek> {
     Evt2(DVSRawEncoderEvt2<R>),
-    //Evt3(DVSRawEncoderEvt3<R>),
 }
 
 // Implement the DvsRawDecoder trait for the enum, using enum dispatch (to avoid heap allocation and boxing)
@@ -113,23 +105,13 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DvsRawDecoderEnum<R> {
     fn read_header(&mut self) -> anyhow::Result<Vec<String>> {
         match self {
             DvsRawDecoderEnum::Evt2(decoder) => decoder.read_header(),
-            DvsRawDecoderEnum::Evt3(decoder) => decoder.read_header(),
             DvsRawDecoderEnum::Dat(decoder) => decoder.read_header(),
         }
     }
 
-    // fn read_event(&mut self) -> anyhow::Result<Option<DVSEvent>> {
-    //     match self {
-    //         DvsRawDecoderEnum::Evt2(decoder) => decoder.read_event(),
-    //         DvsRawDecoderEnum::Evt3(decoder) => decoder.read_event(),
-    //         DvsRawDecoderEnum::Dat(decoder) => decoder.read_event(),
-    //     }
-    // }
-
     fn read_event(&mut self) -> anyhow::Result<Option<DVSRawEvent>> {
         match self {
             DvsRawDecoderEnum::Evt2(decoder) => decoder.read_event(),
-            DvsRawDecoderEnum::Evt3(decoder) => decoder.read_event(),
             DvsRawDecoderEnum::Dat(decoder) => decoder.read_event(),
         }
     }
@@ -147,14 +129,12 @@ impl<R: Write + Seek> DvsRawEncoder<R> for DvsRawEncoderEnum<R> {
     fn write_header(&mut self, header: Vec<String>) -> anyhow::Result<()> {
         match self {
             DvsRawEncoderEnum::Evt2(encoder) => encoder.write_header(header),
-            //DvsRawEncoderEnum::Evt3(encoder) => encoder.write_header(header),
         }
     }
 
     fn write_event(&mut self, event: DVSRawEvent) -> anyhow::Result<()> {
         match self {
             DvsRawEncoderEnum::Evt2(encoder) => encoder.write_event(event),
-            //DvsRawEncoderEnum::Evt3(encoder) => encoder.write_event(events),
         }
     }
 
@@ -177,12 +157,8 @@ pub fn prep_file_decoder<R: std::io::BufRead + std::io::Seek>(file_path: &str) -
         match decoder.read_header() {
             Ok(_) => Ok(DvsRawDecoderEnum::Evt2(decoder)),
             Err(_) => {
-                // Try reading it as an evt3 file
-                let file = File::open(file_path)?;
-                let reader = BufReader::new(file);
-                let mut decoder = raw_decoder_evt3::DVSRawDecoderEvt3::new(reader);
-                decoder.read_header()?;
-                Ok(DvsRawDecoderEnum::Evt3(decoder))
+                // Return an error
+                anyhow::bail!("Unsupported file format. Please provide a .dat or .raw file.");
             }
         }
     } else {

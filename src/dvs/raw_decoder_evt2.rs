@@ -1,15 +1,24 @@
+#![allow(dead_code)]
+
 use crate::dvs::{DVSEvent, DvsRawDecoder, DVSRawEvent};
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B11, B28, B4};
 use modular_bitfield::specifiers::B6;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
+/* 
+This file implements an EVT2 raw event decoder for Dynamic Vision Sensor (DVS) data streams.
+It provides types and logic to parse EVT2-formatted event files, extract sensor metadata, and decode individual events.
+*/
+
+type Timestamp = u64;
+// An enum representing the possible event types in EVT2 streams:
 #[derive(Debug, Clone, Copy)]
 enum EventTypes {
-    CdOff = 0x0,
-    CdOn = 0x1,
-    EvtTimeHigh = 0x8,
-    ExtTrigger = 0xA,
+    CdOff = 0x0,        // Change Detection event, polarity off.
+    CdOn = 0x1,         // Change Detection event, polarity on.
+    EvtTimeHigh = 0x8,  // EVT_TIME_HIGH event, used for timestamp synchronization.
+    ExtTrigger = 0xA,   // External trigger event
 }
 
 impl From<u8> for EventTypes {
@@ -24,6 +33,7 @@ impl From<u8> for EventTypes {
     }
 }
 
+// A bitfield struct representing the raw 32 bits of an event in EVT2 format
 #[bitfield]
 #[derive(Clone, Debug)]
 struct RawEvent {
@@ -31,6 +41,23 @@ struct RawEvent {
     pad: B28
 }
 
+// A bitfield struct for EVT_TIME_HIGH events, which contain a timestamp
+#[bitfield]
+struct RawEventTime {
+    r#type: B4,     // Event type
+    timestamp: B28  // Event timestamp
+}
+
+// A bitfield struct for Change Detection events, which contain pixel coordinates, polarity, and timestamp
+#[bitfield]
+struct RawEventCD {
+    r#type: B4,     // Event type
+    timestamp: B6,  // Event timestamp
+    x: B11,         // Pixel X coordinate
+    y: B11,         // Pixel Y coordinate
+}
+
+// Conversion from bytes to RawEvent
 impl From<[u8; 4]> for RawEvent {
     fn from(value: [u8; 4]) -> Self {
         let mut event = RawEvent::new();
@@ -45,20 +72,7 @@ impl From<[u8; 4]> for RawEvent {
     }
 }
 
-#[bitfield]
-struct RawEventTime {
-    r#type: B4,
-    timestamp: B28
-}
-
-#[bitfield]
-struct RawEventCD {
-    r#type: B4, // Event type : EventTypes::EVT_ADDR_X
-    timestamp: B6,
-    x: B11, // Pixel X coordinate
-    y: B11, // Pixel Y coordinate
-}
-
+// Conversion from Raw event to RawEventTime
 impl From<RawEvent> for RawEventTime {
     fn from(event: RawEvent) -> Self {
         let event_time = RawEventTime::new()
@@ -68,6 +82,7 @@ impl From<RawEvent> for RawEventTime {
     }
 }
 
+// Conversion from RawEvent to RawEventCD
 impl From<RawEvent> for RawEventCD {
     fn from(event: RawEvent) -> Self {
         let event_cd = RawEventCD::new()
@@ -79,7 +94,7 @@ impl From<RawEvent> for RawEventCD {
     }
 }
 
-type Timestamp = u64;
+
 
 struct Metadata {
     sensor_width: i32,
@@ -95,6 +110,7 @@ impl Default for Metadata {
     }
 }
 
+// The main decoder struct. Wraps a buffered reader and maintains state for timestamp base and event parsing.
 pub struct DVSRawDecoderEvt2<R: Read + BufRead + Seek> {
     reader: BufReader<R>,
     first_time_base_set: bool,
@@ -104,6 +120,7 @@ pub struct DVSRawDecoderEvt2<R: Read + BufRead + Seek> {
 }
 
 impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
+    // Creates a new DVSRawDecoderEvt2 instance with a buffered reader
     fn new(reader: R) -> Self {
         let _buffer_read: Vec<u8> = vec![0; std::mem::size_of::<[u8; 4]>()];
 
@@ -116,6 +133,8 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
         }
     }
 
+    // Reads the header of the EVT2 file, extracting metadata and setting the initial time base
+    // Returns the header as a vector of strings
     fn read_header(&mut self) -> anyhow::Result<Vec<String>> {
         // Copy header
         let mut header: Vec<String> = Vec::new();
@@ -133,7 +152,6 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
 
         let mut metadata = Metadata::default();
         let mut first_char = [0; 1];
-        //let reader = self.reader.get_mut();
         // Reset the reader to the beginning
         self.reader.seek(SeekFrom::Start(0))?;
 
@@ -214,9 +232,10 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
     }
 
     
+    // Reads the next event from the EVT2 file, returning it as a DVSRawEvent
     fn read_event(&mut self) -> anyhow::Result<Option<DVSRawEvent>> {
         loop {
-            // Read events
+            // Read event
             self.reader.read_exact(unsafe {
                 std::slice::from_raw_parts_mut(
                     self.buffer_read.as_mut_ptr() as *mut u8,
