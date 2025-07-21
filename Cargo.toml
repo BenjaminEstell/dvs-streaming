@@ -1,0 +1,12 @@
+[package]
+name = "ebod"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.28.1"
+bytes = "1.7.1"
+anyhow = { version = "1", features = ["backtrace"] }
+modular-bitfield = "0.11.2"
+clap = { version = "4.0", features = ["derive"] }
+hdf5 = "0.8"
