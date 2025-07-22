@@ -283,7 +283,7 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
                     }
 
                     self.current_time_base = new_time_base;
-                    return Ok(Some(DVSRawEvent::TimeHigh { timestamp: ev_time_high.timestamp() as Timestamp }));
+                    return Ok(Some(DVSRawEvent::TimeHigh { timestamp: (ev_time_high.timestamp() as Timestamp) << 6 }));
 
                 }
                 x if x == EventTypes::ExtTrigger as u8 => {

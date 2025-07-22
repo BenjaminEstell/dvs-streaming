@@ -138,7 +138,7 @@ impl<R: Write + Seek> DvsRawEncoder<R> for DVSRawEncoderEvt2<R> {
             }
             DVSRawEvent::TimeHigh { timestamp } => {
                 let raw_time_event = RawEventTime::new()
-                    .with_timestamp(timestamp as u32)
+                    .with_timestamp((timestamp >> 6) as u32)
                     .with_type(EventTypes::EvtTimeHigh as u8);
                 // Convert to RawEvent
                 let raw_event = RawEvent::from(raw_time_event);
