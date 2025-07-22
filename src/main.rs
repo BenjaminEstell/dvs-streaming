@@ -1,5 +1,5 @@
 use std::io::BufReader;
-use dvs::dvs::{prep_file_decoder, DvsRawDecoder, DVSRawEvent};
+use dvs::dvs::{prep_file_decoder, prep_file_encoder, DvsRawDecoder, DvsRawEncoder, DVSRawEvent};
 use clap::Parser;
 
 pub type Timestamp = u64;
@@ -16,7 +16,6 @@ struct Cli {
 
 
 fn decode_events(path: &str) -> Result<(Vec<dvs::dvs::DVSRawEvent>, Vec<String>), Box<dyn std::error::Error>> {
-    println!("Creating decoder using path {}", path);
     // Open file
     let mut decoder = prep_file_decoder::<BufReader<std::fs::File>>(path)?;
 
@@ -30,25 +29,19 @@ fn decode_events(path: &str) -> Result<(Vec<dvs::dvs::DVSRawEvent>, Vec<String>)
         events.push(event);
     }
 
-    // Print the number of events collected
-    println!("Collected {} events", events.len());
     Ok((events, header))
 }
 
 
 fn encode_events(path: &str, events: Vec<DVSRawEvent>, header: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Open or create file
-    let mut encoder = dvs::dvs::prep_file_encoder::<std::io::BufWriter<std::fs::File>>(path).unwrap();
+    let mut encoder = prep_file_encoder::<std::io::BufWriter<std::fs::File>>(path).unwrap();
     // Write header to the file
-    let _ = dvs::dvs::DvsRawEncoder::write_header(&mut encoder, header);
+    let _ = DvsRawEncoder::write_header(&mut encoder, header);
     // Write all events to the file
-    println!("Writing {} events to file {}", events.len(), path);
-    let mut write_ctr = 0;
     for event in events {
-        let _ = dvs::dvs::DvsRawEncoder::write_event(&mut encoder, event);
-        write_ctr += 1;
+        let _ = DvsRawEncoder::write_event(&mut encoder, event);
     }
-    println!("Wrote {} events to file {}", write_ctr, path);
     Ok(())
 }
 
