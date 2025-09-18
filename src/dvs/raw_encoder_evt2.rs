@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::dvs::{DvsRawEncoder, DVSRawEvent};
+use crate::dvs::{DvsRawEncoder, DVSEvent};
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B28, B4, B11, B6};
 use std::io::{BufWriter, Write, Seek};
@@ -10,7 +10,6 @@ This file implements an EVT2 raw event encoder for Dynamic Vision Sensor (DVS) d
 It provides types and logic to parse a vector of DVSRaWEvents into an EVT2-formatted event file, extract sensor metadata, and decode individual events.
 */
 
-type Timestamp = u64;
 // An enum representing the possible event types in EVT2 streams:
 #[derive(Debug, Clone, Copy)]
 enum EventTypes {
@@ -91,6 +90,8 @@ impl From<RawEvent> for [u8; 4] {
 
 pub struct DVSRawEncoderEvt2<R: Write + Seek> {
     writer: BufWriter<R>,
+    first_timehigh_written: bool,
+    ts_last_timehigh: u64,
 }
 
 impl<R: Write + Seek> DvsRawEncoder<R> for DVSRawEncoderEvt2<R> {
@@ -98,7 +99,9 @@ impl<R: Write + Seek> DvsRawEncoder<R> for DVSRawEncoderEvt2<R> {
         let _buffer_write: Vec<u8> = vec![0; std::mem::size_of::<RawEvent>()];
 
         Self {
-            writer: BufWriter::new(writer)
+            writer: BufWriter::new(writer),
+            first_timehigh_written: false,
+            ts_last_timehigh: 0,
         }
     }
 
@@ -114,38 +117,60 @@ impl<R: Write + Seek> DvsRawEncoder<R> for DVSRawEncoderEvt2<R> {
     }
 
     // Writes a DVSRawEvent to the EVT2 file, converting it to the appropriate RawEvent format
-    fn write_event(&mut self, event: DVSRawEvent) -> anyhow::Result<()> {
-        match event {
-            DVSRawEvent::CD(ev) => {
-                // Determine event type and polarity
-                let (event_type, _polarity) = match ev.polarity {
-                    0 => (EventTypes::CdOff, 0),
-                    1 => (EventTypes::CdOn, 1),
-                    _ => (EventTypes::CdOff, 0), // Default or error handling
-                };
-    
-                let timestamp_low = (ev.timestamp & 0x3F) as u8;
-                let raw_event_cd = RawEventCD::new()
-                    .with_x(ev.x)
-                    .with_y(ev.y)
-                    .with_timestamp(timestamp_low)
-                    .with_type(event_type as u8);
-    
-                // Convert to RawEvent
-                let raw_event = RawEvent::from(raw_event_cd);
-                // Convert to bytes and write
-                self.writer.write_all(&<[u8; 4]>::from(raw_event))?;
+    fn write_event(&mut self, event: DVSEvent) -> anyhow::Result<u8> {
+        let mut events_written: u8 = 0;
+        // If necessary, write a Time High event
+        // if we haven't generated any time high events yet 
+        if !self.first_timehigh_written {
+            self.first_timehigh_written = true;
+            self.ts_last_timehigh = event.timestamp & !0x3F; // Get the upper 28 bits of the event's timestamp
+            // Generate a Time High Event with the same timestamp as the first CD event in the stream
+            let raw_time_event = RawEventTime::new()
+                .with_timestamp((self.ts_last_timehigh >> 6) as u32)
+                .with_type(EventTypes::EvtTimeHigh as u8);
+            // Convert to RawEvent
+            let raw_event = RawEvent::from(raw_time_event);
+            // Convert to bytes and write
+            self.writer.write_all(&<[u8; 4]>::from(raw_event))?;
+            events_written+=1;
+        } else {
+            // Find the timestamp of a time high event just before the CD event we are trying to write
+            while (self.ts_last_timehigh) < (event.timestamp & !0x3F) {
+                // Increment the Time High Timestamp
+                self.ts_last_timehigh = self.ts_last_timehigh + 0x40;
             }
-            DVSRawEvent::TimeHigh { timestamp } => {
-                let raw_time_event = RawEventTime::new()
-                    .with_timestamp((timestamp >> 6) as u32)
-                    .with_type(EventTypes::EvtTimeHigh as u8);
-                // Convert to RawEvent
-                let raw_event = RawEvent::from(raw_time_event);
-                // Convert to bytes and write
-                self.writer.write_all(&<[u8; 4]>::from(raw_event))?;
-            }
+            // Generate a Time High Event
+            let raw_time_event = RawEventTime::new()
+                .with_timestamp((self.ts_last_timehigh >> 6) as u32)
+                .with_type(EventTypes::EvtTimeHigh as u8);
+            // Convert to RawEvent
+            let raw_event = RawEvent::from(raw_time_event);
+            // Convert to bytes and write
+            self.writer.write_all(&<[u8; 4]>::from(raw_event))?;
+            events_written+=1;
         }
-        Ok(())
+
+        // Then, write the CD Event
+        // Determine event type and polarity
+        let event_type = match event.polarity {
+            0 => EventTypes::CdOff,
+            1 => EventTypes::CdOn,
+            _ => EventTypes::CdOff, // Default or error handling
+        };
+        // Write just the lower 6 bits of the timestamp as part of the CD Event
+        let timestamp_low = (event.timestamp & 0x3F) as u8;
+        let raw_event_cd = RawEventCD::new()
+            .with_x(event.x)
+            .with_y(event.y)
+            .with_timestamp(timestamp_low)
+            .with_type(event_type as u8);
+
+        // Convert to RawEvent
+        let raw_event = RawEvent::from(raw_event_cd);
+        // Convert to bytes and write
+        self.writer.write_all(&<[u8; 4]>::from(raw_event))?;
+        events_written+=1;
+
+        Ok(events_written)
     }
 }

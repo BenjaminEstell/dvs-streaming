@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
-use crate::dvs::{DVSEvent, DvsRawDecoder, DVSRawEvent};
+use crate::dvs::{DVSEvent, DvsRawDecoder};
+use anyhow::anyhow;
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B11, B28, B4};
 use modular_bitfield::specifiers::B6;
@@ -11,7 +12,6 @@ This file implements an EVT2 raw event decoder for Dynamic Vision Sensor (DVS) d
 It provides types and logic to parse EVT2-formatted event files, extract sensor metadata, and decode individual events.
 */
 
-type Timestamp = u64;
 // An enum representing the possible event types in EVT2 streams:
 #[derive(Debug, Clone, Copy)]
 enum EventTypes {
@@ -168,8 +168,7 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
                     let format_str = &line[8..];
                     let mut parts = format_str.split(';');
                     if parts.next().unwrap() != "EVT2" {
-                        eprintln!("Error: detected non-EVT2 input file");
-                        return Ok(header);
+                        return Err(anyhow!("Error: detected non-EVT2 input file"));
                     }
                     for option in parts {
                         let mut kv = option.split('=');
@@ -188,9 +187,7 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
                     metadata.sensor_height = parts.next().unwrap().parse().unwrap();
                 } else if line.starts_with(" evt ") {
                     if &line[5..] != "2.0\n" {
-                        dbg!(line[5..].to_string());
-                        eprintln!("Error: detected non-EVT2 input file");
-                        return Ok(header);
+                        return Err(anyhow!("Error: detected non-EVT2 input file"));
                     }
                 }
             } else {
@@ -221,7 +218,7 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
             match raw_event.r#type() {
                 x if x == EventTypes::EvtTimeHigh as u8 => {
                     let ev_time_high = RawEventTime::from(raw_event);
-                    self.current_time_base = (ev_time_high.timestamp() as Timestamp) << 6;
+                    self.current_time_base = (ev_time_high.timestamp() as u64) << 6;
                     self.first_time_base_set = true;
                     break;
                 }
@@ -233,7 +230,7 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
 
     
     // Reads the next event from the EVT2 file, returning it as a DVSRawEvent
-    fn read_event(&mut self) -> anyhow::Result<Option<DVSRawEvent>> {
+    fn read_event(&mut self) -> anyhow::Result<Option<DVSEvent>> {
         loop {
             // Read event
             self.reader.read_exact(unsafe {
@@ -247,31 +244,31 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
             match raw_event.r#type() {
                 x if x == EventTypes::CdOff as u8 => {
                     let ev_cd = RawEventCD::from(raw_event);
-                    let t = self.current_time_base + ev_cd.timestamp() as Timestamp;
-                    return Ok(Some(DVSRawEvent::CD(DVSEvent {
+                    let t = self.current_time_base + ev_cd.timestamp() as u64;
+                    return Ok(Some(DVSEvent {
                         timestamp: t,
                         x: ev_cd.x(),
                         y: ev_cd.y(),
                         polarity: 0,
-                    })));
+                    }));
                 }
                 x if x == EventTypes::CdOn as u8 => {
                     let ev_cd = RawEventCD::from(raw_event);
-                    let t = self.current_time_base + ev_cd.timestamp() as Timestamp;
-                    return Ok(Some(DVSRawEvent::CD(DVSEvent {
+                    let t = self.current_time_base + ev_cd.timestamp() as u64;
+                    return Ok(Some(DVSEvent {
                         timestamp: t,
                         x: ev_cd.x(),
                         y: ev_cd.y(),
                         polarity: 1,
-                    })));
+                    }));
                 }
                 x if x == EventTypes::EvtTimeHigh as u8 => {
-                    const MAX_TIMESTAMP_BASE: Timestamp = ((1 << 28) - 1) << 6;
-                    const TIME_LOOP: Timestamp = MAX_TIMESTAMP_BASE + (1 << 6);
-                    const LOOP_THRESHOLD: Timestamp = 10 << 6;
+                    const MAX_TIMESTAMP_BASE: u64 = ((1 << 28) - 1) << 6;
+                    const TIME_LOOP: u64 = MAX_TIMESTAMP_BASE + (1 << 6);
+                    const LOOP_THRESHOLD: u64 = 10 << 6;
 
                     let ev_time_high = RawEventTime::from(raw_event);
-                    let mut new_time_base = (ev_time_high.timestamp() as Timestamp) << 6;
+                    let mut new_time_base = (ev_time_high.timestamp() as u64) << 6;
                     new_time_base += self.n_time_high_loop * TIME_LOOP;
 
                     if self.current_time_base > new_time_base
@@ -283,14 +280,13 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
                     }
 
                     self.current_time_base = new_time_base;
-                    return Ok(Some(DVSRawEvent::TimeHigh { timestamp: (ev_time_high.timestamp() as Timestamp) << 6 }));
+                    return Ok(None);
 
-                }
+                }           
                 x if x == EventTypes::ExtTrigger as u8 => {
                     // Ignore for now--we're not doing anything with triggers.
                 }
                 _ => {
-                    //println!("Unknown event type: {}", unsafe { (*raw_event).r#type() });
                 }
             }
         }

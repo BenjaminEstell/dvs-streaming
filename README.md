@@ -10,7 +10,7 @@ This library is designed for efficient reading and writing of Dynamic Vision Sen
 ## Getting Started
 
 - Run `cargo build` to build the module.
-- To run the example, use the command `cargo run-- --file test_day_001.raw --output output_day_001.raw`, replacing the name of the 
+- To run the example, use the command `cargo run -- --file test_day_001.raw --output output_day_001.raw`, replacing the name of the 
 input file with a .raw file.
 - To incorporate the decoder and encoder into your streaming applications, see the example in 'main.rs'. 
 - The decoder and encoder are initialized by `prep_file_decoder()` and `prep_file_encoder()`, respectively.

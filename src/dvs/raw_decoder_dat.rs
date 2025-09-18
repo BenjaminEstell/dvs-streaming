@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::dvs::{DvsRawDecoder, DVSRawEvent};
+use crate::dvs::{DvsRawDecoder, DVSEvent};
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B4, B32, B14};
 use std::io::{self, BufRead, BufReader, Read, Seek};
@@ -120,7 +120,7 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderDat<R> {
 
     // }
 
-    fn read_event(&mut self) -> anyhow::Result<Option<DVSRawEvent>> {
+    fn read_event(&mut self) -> anyhow::Result<Option<DVSEvent>> {
         Ok(None)
     }
 }

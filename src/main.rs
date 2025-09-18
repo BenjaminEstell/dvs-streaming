@@ -1,5 +1,5 @@
 use std::io::BufReader;
-use dvs::dvs::{prep_file_decoder, prep_file_encoder, DvsRawDecoder, DvsRawEncoder, DVSRawEvent};
+use dvs::dvs::{prep_file_decoder, prep_file_encoder, DvsRawDecoderEnum, CompressionFormat, DVSEvent, DvsRawDecoder, DvsRawEncoder};
 use clap::Parser;
 
 pub type Timestamp = u64;
@@ -15,27 +15,40 @@ struct Cli {
 }
 
 
-fn decode_events(path: &str) -> Result<(Vec<dvs::dvs::DVSRawEvent>, Vec<String>), Box<dyn std::error::Error>> {
+fn decode_events(path: &str) -> Result<(Vec<dvs::dvs::DVSEvent>, Vec<String>, CompressionFormat, i64), Box<dyn std::error::Error>> {
     // Open file
     let mut decoder = prep_file_decoder::<BufReader<std::fs::File>>(path)?;
+    let compression_format;
+    match decoder {
+        DvsRawDecoderEnum::Evt2(_) => compression_format = CompressionFormat::EVT2,
+        DvsRawDecoderEnum::Evt3(_) => compression_format = CompressionFormat::EVT3,
+        DvsRawDecoderEnum::Dat(_) => compression_format = CompressionFormat::DAT,
+    }
 
     let header = decoder.read_header()?;
 
     // Create a vector to hold events
-    let mut events: Vec<dvs::dvs::DVSRawEvent> = Vec::new();
+    let mut events: Vec<dvs::dvs::DVSEvent> = Vec::new();
 
     // while events can be read from the file
-    while let Ok(Some(event)) = decoder.read_event() {
-        events.push(event);
+    let mut num_events: i64 = 0;
+    while let Ok(event_option) = decoder.read_event() {
+        match event_option {
+            Some(event) =>  {
+                events.push(event);
+                num_events+=1;
+            }
+            None => num_events+=1,
+        }
     }
 
-    Ok((events, header))
+    Ok((events, header, compression_format, num_events))
 }
 
 
-fn encode_events(path: &str, events: Vec<DVSRawEvent>, header: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+fn encode_events(path: &str, events: Vec<DVSEvent>, header: Vec<String>, fmt: CompressionFormat) -> Result<(), Box<dyn std::error::Error>> {
     // Open or create file
-    let mut encoder = prep_file_encoder::<std::io::BufWriter<std::fs::File>>(path).unwrap();
+    let mut encoder = prep_file_encoder::<std::io::BufWriter<std::fs::File>>(path, fmt).unwrap();
     // Write header to the file
     let _ = DvsRawEncoder::write_header(&mut encoder, header);
     // Write all events to the file
@@ -55,19 +68,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Decode events from file
     let events_ = decode_events(file_path.as_str());
 
-    let (events, header): (Vec<DVSRawEvent>, Vec<String>);
+    let (events, header, compression_format, num_events): (Vec<DVSEvent>, Vec<String>, CompressionFormat, i64);
     match events_ {
-        Ok((ev, hdr)) => {
+        Ok((ev, hdr, fmt, ne)) => {
             events = ev;
             header = hdr;
+            compression_format = fmt;
+            num_events = ne;
         },
         Err(e) =>  {
             println!("Error decoding events");
             return Err(e)
         },
     }
+    // print the number of events read
+    println!("Decoded {} events", num_events);
     // Write events out to .raw file
-    let _ = encode_events(&output_path, events, header);
+    let _ = encode_events(&output_path, events.clone(), header, compression_format);
 
     Ok(())
 }
