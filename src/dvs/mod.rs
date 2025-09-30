@@ -2,69 +2,15 @@ use crate::dvs::raw_decoder_evt2::DVSRawDecoderEvt2;
 use crate::dvs::raw_decoder_evt3::DVSRawDecoderEvt3;
 use crate::dvs::raw_encoder_evt2::DVSRawEncoderEvt2;
 use crate::dvs::raw_decoder_dat::DVSRawDecoderDat;
-use bytes::Bytes;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, Write};
+use compression::compression::DVSEvent;
 
 pub mod raw_decoder_evt2;
 pub mod raw_decoder_evt3;
 pub mod raw_decoder_dat;
 pub mod raw_encoder_evt2;
 
-
-pub enum CompressionFormat {
-    EVT2,
-    EVT3,
-    DAT
-}
-
-// This struct represents a captured event from the sensor
-#[derive(Debug, Copy, Clone, Default)]
-pub struct DVSEvent {
-    pub timestamp: u64,
-    pub x: u16,
-    pub y: u16,
-    pub polarity: u8,
-}
-
-
-//unsafe impl Send for DVSEvent {}
-//unsafe impl Sync for DVSEvent {}
-
-// test to see if we need this
-impl DVSEvent{
-    pub fn slice_to_i64(events: &[DVSEvent]) -> bytes::Bytes {
-        let mut array: Vec<u8> = vec![0; events.len() * 4 * std::mem::size_of::<i64>()];
-        let mut offset = 0;
-        for i in 0..events.len(){
-            let curr = &events[i];
-            array[offset..(offset+8)].clone_from_slice(curr.timestamp.to_le_bytes().as_slice());
-            array[(offset + 8)..(offset+10)].clone_from_slice(curr.x.to_le_bytes().as_slice());
-            array[(offset + 16)..(offset+18)].clone_from_slice(curr.y.to_le_bytes().as_slice());
-            array[offset + 24] = curr.polarity;
-            offset += 4 * std::mem::size_of::<i64>();
-        }
-
-        let data: Box<[u8]> = array.into_boxed_slice();
-        Bytes::from(data)
-    }
-}
-
-impl From<DVSEvent> for bytes::Bytes {
-    fn from(event: DVSEvent) -> Self {
-        let event_ptr = &event as *const DVSEvent as *const u8;
-        let event_slice =
-            unsafe { std::slice::from_raw_parts(event_ptr, std::mem::size_of::<DVSEvent>()) };
-        let boxed_slice: Box<[u8]> = Box::from(event_slice);
-        bytes::Bytes::from(boxed_slice)
-    }
-}
-
-impl From<bytes::Bytes> for DVSEvent {
-    fn from(value: Bytes) -> Self {
-        unsafe { std::ptr::read(value.as_ptr() as *const DVSEvent) }
-    }
-}
 
 pub trait DvsRawDecoder<R: Read + BufRead + Seek>: Sized {
     fn new(reader: R) -> Self;
@@ -168,7 +114,7 @@ pub fn prep_file_decoder<R: std::io::BufRead + std::io::Seek>(file_path: &str) -
     }
 }
 
-pub fn prep_file_encoder<R: std::io::Seek>(file_path: &str, fmt: CompressionFormat) -> anyhow::Result<DvsRawEncoderEnum<BufWriter<File>>> {
+pub fn prep_file_encoder<R: std::io::Seek>(file_path: &str) -> anyhow::Result<DvsRawEncoderEnum<BufWriter<File>>> {
     // Delete the file if it exists
     let file_ = File::open(file_path);
     if file_.is_ok() {
@@ -176,9 +122,5 @@ pub fn prep_file_encoder<R: std::io::Seek>(file_path: &str, fmt: CompressionForm
     }
     let file =  File::create(file_path).unwrap();
     let writer = BufWriter::new(file);
-    match fmt {
-        CompressionFormat::EVT2 => Ok(DvsRawEncoderEnum::Evt2(DVSRawEncoderEvt2::new(writer))),
-        CompressionFormat::EVT3 => Ok(DvsRawEncoderEnum::Evt2(DVSRawEncoderEvt2::new(writer))),
-        CompressionFormat::DAT => Ok(DvsRawEncoderEnum::Evt2(DVSRawEncoderEvt2::new(writer))),
-    }
+    Ok(DvsRawEncoderEnum::Evt2(DVSRawEncoderEvt2::new(writer)))
 }

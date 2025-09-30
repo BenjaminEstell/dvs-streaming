@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
-use crate::dvs::{DVSEvent, DvsRawDecoder};
+use crate::dvs::DvsRawDecoder;
+use compression::compression::DVSEvent;
 use anyhow::anyhow;
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B11, B28, B4};
@@ -287,6 +288,7 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
                     // Ignore for now--we're not doing anything with triggers.
                 }
                 _ => {
+                    eprintln!("Error: Invalid event type {}", raw_event.r#type());
                 }
             }
         }
