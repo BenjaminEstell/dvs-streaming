@@ -1,9 +1,6 @@
 use std::io::BufReader;
-use dvs::dvs::{prep_file_decoder, prep_file_encoder, DvsRawDecoder, DvsRawEncoder};
+use dvs::dvs::{prep_file_decoder, prep_file_encoder, DvsRawDecoder, DvsRawEncoder, DVSEvent};
 use clap::Parser;
-use compression::compression::encoder::compress_events;
-use compression::compression::decoder::decompress_events;
-use compression::compression::DVSEvent;
 
 pub type Timestamp = u64;
 // Struct to help with parsing command line args
@@ -65,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Decode events from file
     let events_ = decode_events(file_path.as_str());
 
-    let (mut events, header, num_events): (Vec<DVSEvent>, Vec<String>, i64);
+    let (events, header, num_events): (Vec<DVSEvent>, Vec<String>, i64);
     match events_ {
         Ok((ev, hdr, ne)) => {
             events = ev;
@@ -80,39 +77,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // print the number of events read
     println!("Decoded {} events", num_events);
 
-    // Compress events into intermediate representation
-    let time_step_ms = 50;
-    let intermediate_representation = compress_events(&mut events, time_step_ms)?;
-
-
-    let reconstructed_events = decompress_events(&intermediate_representation)?;
-
-    // Verify reconstructed events are the same as the original events
-    if events.len() != reconstructed_events.len() {
-        println!(
-            "Verification failed: event count mismatch (original: {}, reconstructed: {})",
-            events.len(),
-            reconstructed_events.len()
-        );
-    } else {
-        let mut all_match = true;
-        for (i, (e1, e2)) in events.iter().zip(reconstructed_events.iter()).enumerate() {
-            if e1.timestamp != e2.timestamp || e1.x != e2.x || e1.y != e2.y || e1.polarity != e2.polarity {
-                println!(
-                    "Verification failed at event {}: original = {:?}, reconstructed = {:?}",
-                    i, e1, e2
-                );
-                all_match = false;
-                break;
-            }
-        }
-        if all_match {
-            println!("Verification passed: all reconstructed events match original events.");
-        }
-    }
 
     // Write events out to .raw file
-    let _ = encode_events(&output_path, reconstructed_events, header);
+    let _ = encode_events(&output_path, events, header);
 
     Ok(())
 }

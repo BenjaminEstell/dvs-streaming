@@ -1,7 +1,5 @@
-#![allow(dead_code)]
-
 use crate::dvs::DvsRawDecoder;
-use compression::compression::DVSEvent;
+use crate::dvs::DVSEvent;
 use anyhow::anyhow;
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B11, B28, B4};
@@ -230,7 +228,7 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
     }
 
     
-    // Reads the next event from the EVT2 file, returning it as a DVSRawEvent
+    // Reads the next event from the EVT2 file, returning it as a DVSEvent
     fn read_event(&mut self) -> anyhow::Result<Option<DVSEvent>> {
         loop {
             // Read event
@@ -247,9 +245,9 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
                     let ev_cd = RawEventCD::from(raw_event);
                     let t = self.current_time_base + ev_cd.timestamp() as u64;
                     return Ok(Some(DVSEvent {
-                        timestamp: t,
-                        x: ev_cd.x(),
-                        y: ev_cd.y(),
+                        timestamp: t as i64,
+                        x: ev_cd.x() as i16,
+                        y: ev_cd.y() as i16,
                         polarity: 0,
                     }));
                 }
@@ -257,9 +255,9 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt2<R> {
                     let ev_cd = RawEventCD::from(raw_event);
                     let t = self.current_time_base + ev_cd.timestamp() as u64;
                     return Ok(Some(DVSEvent {
-                        timestamp: t,
-                        x: ev_cd.x(),
-                        y: ev_cd.y(),
+                        timestamp: t as i64,
+                        x: ev_cd.x() as i16,
+                        y: ev_cd.y() as i16,
                         polarity: 1,
                     }));
                 }

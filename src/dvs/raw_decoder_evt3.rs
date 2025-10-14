@@ -1,11 +1,16 @@
+use crate::dvs::DvsRawDecoder;
+use crate::dvs::DVSEvent;
 use anyhow::Result;
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B1, B11, B12, B4, B7, B8};
 use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 
-use crate::dvs::DvsRawDecoder;
-use compression::compression::DVSEvent;
+
+/* 
+This file implements an EVT3 raw event decoder for Dynamic Vision Sensor (DVS) data streams.
+It provides types and logic to parse EVT3-formatted event files, extract sensor metadata, and decode individual events.
+*/
 
 
 #[derive(Debug, Clone, Copy)]
@@ -42,6 +47,8 @@ impl From<u8> for EventTypes {
     }
 }
 
+
+// A bitfield struct representing the raw 16 bits of an event in EVT3 format
 #[bitfield]
 struct RawEvent {
     pad: B12,
@@ -52,16 +59,11 @@ struct RawEvent {
 impl From<[u8; 2]> for RawEvent {
     fn from(value: [u8; 2]) -> Self {
         let mut event = RawEvent::new();
-        let two = value[0] & 0xF;
-        let one = value[0] >> 4;
-        let four = value[1] & 0xF;
-        let three = value[1] >> 4;
         event.set_type(value[1] >> 4);
         event.set_pad(((value[1] & 0xF) as u16) << 8 | (value[0] as u16));
         event
     }
 }
-
 
 
 #[bitfield]
@@ -225,17 +227,16 @@ impl Default for Metadata {
 }
 
 
-
 pub struct DVSRawDecoderEvt3<R: Read + BufRead + Seek> {
     reader: BufReader<R>,
     pub first_time_base_set: bool,
-    pub current_time_base: u64,
-    pub current_time_low: u32,
-    pub current_time: u64,
-    pub current_ev_addr_y: u16,
-    pub current_base_x: u16,
+    pub current_time_base: i64,
+    pub current_time_low: i32,
+    pub current_time: i64,
+    pub current_ev_addr_y: i16,
+    pub current_base_x: i16,
     pub current_polarity: u8,
-    pub n_time_high_loop: u64,
+    pub n_time_high_loop: i64,
     buffer_read: Vec<[u8; 2]>,
     event_queue: VecDeque<DVSEvent>,
 }
@@ -259,6 +260,8 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
         }
     }
 
+    // Reads the header of the EVT3 file, extracting metadata and setting the initial time base
+    // Returns the header as a vector of strings
     fn read_header(&mut self) -> anyhow::Result<Vec<String>> {
         // Copy header
         let mut header: Vec<String> = Vec::new();
@@ -286,16 +289,12 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
                 // read the rest of the line
                 let mut line = String::new();
                 self.reader.read_line(&mut line)?;
-                eprintln!("line: {}", line);
                 if line == " end\n" {
-                    eprintln!("breaking");
-
                     break;
                 } else if line.starts_with(" format ") {
                     let format_str = &line[8..];
                     let mut parts = format_str.split(';');
                     if parts.next().unwrap() != "EVT3" {
-                        eprintln!("Error: detected non-EVT3 input file");
                         return Ok(header);
                     }
                     for option in parts {
@@ -315,25 +314,16 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
                     metadata.sensor_height = parts.next().unwrap().parse().unwrap();
                 } else if line.starts_with(" evt ") {
                     if &line[5..] != "3.0\n" {
-                        dbg!(line[5..].to_string());
-                        eprintln!("Error: detected non-EVT3 input file");
                         return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid file format").into());
                     }
                 }
             } else {
                 // Move the reader back one byte if we didn't have the "% end\n" line
                 self.reader.seek(SeekFrom::Current(-1))?;
-                eprintln!("breaking2");
                 break;
             }
         }
 
-        if metadata.sensor_width > 0 && metadata.sensor_height > 0 {
-            eprintln!(
-                "%geometry:{}x{}",
-                metadata.sensor_width, metadata.sensor_height
-            );
-        }
 
         // First, skip any events until we get one of the type EVT_TIME_HIGH
         loop {
@@ -355,7 +345,7 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
                     let mut time_buf = [0u8; 2];
                     self.reader.read_exact(&mut time_buf)?;
                     let ev_time_low = RawEventEvtTimeLow::from(RawEvent::from(time_buf));
-                    self.current_time_base = (ev_time_high.time() as u64) << 12 | ev_time_low.time() as u64;
+                    self.current_time_base = (ev_time_high.time() as i64) << 12 | ev_time_low.time() as i64;
                     self.current_time = self.current_time_base;
                     self.first_time_base_set = true;
                     break;
@@ -367,6 +357,8 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
         Ok(header)
     }
 
+    // Reads the next event from the EVT3 file, returning it as a DVSEvent, if possible. Otherwise, it
+    // continues processing events until a DVSEvent can be returned.
     fn read_event(&mut self) -> Result<Option<DVSEvent>> {
         if let Some(event) = self.event_queue.pop_front() {
             return Ok(Some(event));
@@ -387,17 +379,9 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
                 EventTypes::EvtAddrX => {
                     let ev_addr_x = RawEventEvtAddrX::from(raw_event);
 
-                    // eprintln!(
-                    //     "EvtAddrX X: {}, Y: {}, Timestamp: {}, Pol: {}",
-                    //     ev_addr_x.x(),
-                    //     self.current_ev_addr_y,
-                    //     self.current_time,
-                    //     ev_addr_x.pol()
-                    // );
-
                     return Ok(Some(DVSEvent {
                         timestamp: self.current_time,
-                        x: ev_addr_x.x(),
+                        x: ev_addr_x.x() as i16,
                         y: self.current_ev_addr_y,
                         polarity: ev_addr_x.pol(),
                     }));
@@ -417,13 +401,6 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
                         }
                         valid >>= 1;
                     }
-                    // eprintln!(
-                    //     "Vect12 X: {}, Y: {}, Timestamp: {}, Pol: {}",
-                    //     self.current_base_x,
-                    //     self.current_ev_addr_y,
-                    //     self.current_time,
-                    //     self.current_polarity,
-                    // );
                     self.current_base_x = end;
                     if let Some(event) = self.event_queue.pop_front() {
                         return Ok(Some(event));
@@ -444,14 +421,6 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
                         }
                         valid >>= 1;
                     }
-
-                    // eprintln!(
-                    //     "Vect8 X: {}, Y: {}, Timestamp: {}, Pol: {}",
-                    //     self.current_base_x,
-                    //     self.current_ev_addr_y,
-                    //     self.current_time,
-                    //     self.current_polarity,
-                    // );
                     self.current_base_x = end;
                     if let Some(event) = self.event_queue.pop_front() {
                         return Ok(Some(event));
@@ -459,33 +428,19 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
                 }
                 EventTypes::EvtAddrY => {
                     let ev_addr_y = RawEventEvtAddrY::from(raw_event);
-                    self.current_ev_addr_y = ev_addr_y.y();
-                    // eprintln!(
-                    //     "EvtAddrY X: {}, Y: {}, Timestamp: {}, Pol: {}",
-                    //     self.current_base_x,
-                    //     self.current_ev_addr_y,
-                    //     self.current_time,
-                    //     self.current_polarity,
-                    // );
+                    self.current_ev_addr_y = ev_addr_y.y() as i16;
                 }
                 EventTypes::VectBaseX => {
                     let ev_xbase = RawEventVectBaseX::from(raw_event);
                     self.current_polarity = ev_xbase.pol();
-                    self.current_base_x = ev_xbase.x();
-                    // eprintln!(
-                    //     "VectBaseX X: {}, Y: {}, Timestamp: {}, Pol: {}",
-                    //     self.current_base_x,
-                    //     self.current_ev_addr_y,
-                    //     self.current_time,
-                    //     self.current_polarity,
-                    // );
+                    self.current_base_x = ev_xbase.x() as i16;
                 }
                 EventTypes::EvtTimeHigh => {
-                    static MAX_TIMESTAMP_BASE: u64 = ((1u64 << 12) - 1) << 12;
-                    static TIME_LOOP: u64 = MAX_TIMESTAMP_BASE + (1 << 12);
-                    static LOOP_THRESHOLD: u64 = 10 << 12;
+                    static MAX_TIMESTAMP_BASE: i64 = ((1i64 << 12) - 1) << 12;
+                    static TIME_LOOP: i64 = MAX_TIMESTAMP_BASE + (1 << 12);
+                    static LOOP_THRESHOLD: i64 = 10 << 12;
                     let ev_time_high = RawEventEvtTimeHigh::from(raw_event);
-                    let mut new_time_base = (ev_time_high.time() as u64) << 12;
+                    let mut new_time_base = (ev_time_high.time() as i64) << 12;
                     new_time_base += self.n_time_high_loop * TIME_LOOP;
 
                     if (self.current_time_base > new_time_base)
@@ -493,32 +448,16 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
                             >= MAX_TIMESTAMP_BASE - LOOP_THRESHOLD)
                     {
                         self.n_time_high_loop += 1;
-                        dbg!(self.n_time_high_loop);
                         new_time_base += TIME_LOOP;
                     }
 
                     self.current_time_base = new_time_base;
                     self.current_time = self.current_time_base;
-
-                    // eprintln!(
-                    //     "EvtTimeHigh X: {}, Y: {}, Timestamp: {}, Pol: {}",
-                    //     self.current_base_x,
-                    //     self.current_ev_addr_y,
-                    //     self.current_time,
-                    //     self.current_polarity,
-                    // );
                 }
                 EventTypes::EvtTimeLow => {
                     let ev_time_low = RawEventEvtTimeLow::from(raw_event);
-                    self.current_time_low = ev_time_low.time() as u32;
-                    self.current_time = self.current_time_base + self.current_time_low as u64;
-                    // eprintln!(
-                    //     "EvtTimeLow X: {}, Y: {}, Timestamp: {}, Pol: {}",
-                    //     self.current_base_x,
-                    //     self.current_ev_addr_y,
-                    //     self.current_time,
-                    //     self.current_polarity,
-                    // );
+                    self.current_time_low = ev_time_low.time() as i32;
+                    self.current_time = self.current_time_base + self.current_time_low as i64;
                 }
                 EventTypes::Continued4 => {
 
@@ -527,7 +466,6 @@ impl<R: Read + BufRead + Seek> DvsRawDecoder<R> for DVSRawDecoderEvt3<R> {
 
                 }
                 _ => {
-                    //eprintln!("Error: Invalid event type {} from raw event {:?}", raw_event.r#type(), self.buffer_read[0]);
                 }
             }   
         }

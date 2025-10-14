@@ -4,12 +4,22 @@ use crate::dvs::raw_encoder_evt2::DVSRawEncoderEvt2;
 use crate::dvs::raw_decoder_dat::DVSRawDecoderDat;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, Write};
-use compression::compression::DVSEvent;
 
 pub mod raw_decoder_evt2;
 pub mod raw_decoder_evt3;
 pub mod raw_decoder_dat;
 pub mod raw_encoder_evt2;
+
+
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct DVSEvent {
+    pub timestamp: i64,
+    pub x: i16,
+    pub y: i16,
+    pub polarity: u8,
+}
+
 
 
 pub trait DvsRawDecoder<R: Read + BufRead + Seek>: Sized {

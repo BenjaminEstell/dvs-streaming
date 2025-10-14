@@ -1,6 +1,5 @@
-#![allow(dead_code)]
-
-use crate::dvs::{DvsRawEncoder, DVSEvent};
+use crate::dvs::DVSEvent;
+use crate::dvs::DvsRawEncoder;
 use modular_bitfield::bitfield;
 use modular_bitfield::prelude::{B28, B4, B11, B6};
 use std::io::{BufWriter, Write, Seek};
@@ -91,7 +90,7 @@ impl From<RawEvent> for [u8; 4] {
 pub struct DVSRawEncoderEvt2<R: Write + Seek> {
     writer: BufWriter<R>,
     first_timehigh_written: bool,
-    ts_last_timehigh: u64,
+    ts_last_timehigh: i64,
 }
 
 impl<R: Write + Seek> DvsRawEncoder<R> for DVSRawEncoderEvt2<R> {
@@ -160,8 +159,8 @@ impl<R: Write + Seek> DvsRawEncoder<R> for DVSRawEncoderEvt2<R> {
         // Write just the lower 6 bits of the timestamp as part of the CD Event
         let timestamp_low = (event.timestamp & 0x3F) as u8;
         let raw_event_cd = RawEventCD::new()
-            .with_x(event.x)
-            .with_y(event.y)
+            .with_x(event.x as u16)
+            .with_y(event.y as u16)
             .with_timestamp(timestamp_low)
             .with_type(event_type as u8);
 
