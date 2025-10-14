@@ -2,7 +2,7 @@
 
 ## Overview
 
-**dvs-streaming** provides an encoder and decoder for parsing event streams from Prophesee's EVT2 format into a simple Rust struct, `DVSEvent`.  
+**dvs-streaming** provides an encoder and decoder for parsing event streams from Prophesee's EVT2 or EVT3 format into a simple Rust struct, `DVSEvent`.  
 This library is designed for efficient reading and writing of Dynamic Vision Sensor (DVS) event data, enabling easy integration with Rust-based event processing pipelines.
 
 ---
